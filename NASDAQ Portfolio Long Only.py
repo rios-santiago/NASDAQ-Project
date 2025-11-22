@@ -1,9 +1,15 @@
-# nasdaq_portfolio_long_only.py
+
+import sys
+output_file = open("Portfolio Results.txt", "w")
+sys.stdout = output_file
+
 
 import os
 import pandas as pd
 import numpy as np
 from scipy.optimize import minimize
+
+pd.set_option('display.float_format', lambda x: f'{x:.4f}')
 
 print("Current working directory:", os.getcwd())
 
@@ -152,3 +158,5 @@ print("\n===== ANNUALIZED STATS (NO SHORTING, 12 months/year) =====")
 print(f"Annualized expected return: {annual_mean_ns:.6f}")
 print(f"Annualized std deviation:   {annual_std_ns:.6f}")
 print(f"Annualized Sharpe ratio:    {annual_sharpe_ns:.6f}")
+
+output_file.close()

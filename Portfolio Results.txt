@@ -1,0 +1,47 @@
+===== PER-ASSET MEAN RETURNS (monthly) =====
+NASDAQCOM_PC1     0.1375
+NASDAQNQCAN_PC1   0.1118
+NASDAQNQGBN_PC1   0.0838
+NASDAQNQJPN_PC1   0.0730
+
+
+===== PER-ASSET STANDARD DEVIATIONS (monthly) =====
+NASDAQCOM_PC1     0.1979
+NASDAQNQCAN_PC1   0.2148
+NASDAQNQGBN_PC1   0.1848
+NASDAQNQJPN_PC1   0.1652
+
+
+===== PER-ASSET VARIANCES (monthly) =====
+NASDAQCOM_PC1     0.0392
+NASDAQNQCAN_PC1   0.0461
+NASDAQNQGBN_PC1   0.0342
+NASDAQNQJPN_PC1   0.0273
+
+
+===== COVARIANCE MATRIX (monthly) =====
+                 NASDAQCOM_PC1  NASDAQNQCAN_PC1  NASDAQNQGBN_PC1  NASDAQNQJPN_PC1
+NASDAQCOM_PC1           0.0392           0.0280           0.0267           0.0248
+NASDAQNQCAN_PC1         0.0280           0.0461           0.0342           0.0240
+NASDAQNQGBN_PC1         0.0267           0.0342           0.0342           0.0237
+NASDAQNQJPN_PC1         0.0248           0.0240           0.0237           0.0273
+
+
+
+===== MAX SHARPE (NO SHORTING) WEIGHTS =====
+NASDAQCOM_PC1     0.8592
+NASDAQNQCAN_PC1   0.1408
+NASDAQNQGBN_PC1   0.0000
+NASDAQNQJPN_PC1   0.0000
+
+
+===== PORTFOLIO STATS (NO SHORTING, monthly) =====
+Expected return: 0.133867
+Std deviation:   0.191336
+Variance:        0.036610
+Sharpe ratio:    0.699644
+
+===== ANNUALIZED STATS (NO SHORTING, 12 months/year) =====
+Annualized expected return: 1.606406
+Annualized std deviation:   0.662808
+Annualized Sharpe ratio:    2.423637
