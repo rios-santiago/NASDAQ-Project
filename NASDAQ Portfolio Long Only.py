@@ -9,7 +9,6 @@ print("Current working directory:", os.getcwd())
 
 # === 1. Set your file paths ===
 # Use absolute paths or put the files in this folder and just use filenames.
-# Here I show absolute paths with FORWARD SLASHES to avoid Windows escape issues.
 
 files = {
     "NASDAQCOM_PC1": r"C:\Users\santi_nuaavil\Downloads\NASDAQCOM_PC1.xlsx",
@@ -63,6 +62,8 @@ returns = merged[["NASDAQCOM_PC1",
                   "NASDAQNQCAN_PC1",
                   "NASDAQNQGBN_PC1",
                   "NASDAQNQJPN_PC1"]].copy()
+
+returns = returns / 100
 
 # === 5. Descriptive statistics ===
 mean_returns = returns.mean()
