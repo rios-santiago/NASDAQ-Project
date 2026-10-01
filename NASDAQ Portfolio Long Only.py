@@ -1,162 +1,124 @@
+"""Explore a fully invested, long-only maximum-Sharpe allocation (rf = 0)."""
 
-import sys
-output_file = open("Portfolio Results.txt", "w")
-sys.stdout = output_file
+import argparse
+from contextlib import redirect_stdout
+from pathlib import Path
 
-
-import os
-import pandas as pd
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 from scipy.optimize import minimize
 
-pd.set_option('display.float_format', lambda x: f'{x:.4f}')
+SERIES = ["NASDAQCOM_PC1", "NASDAQNQCAN_PC1", "NASDAQNQGBN_PC1", "NASDAQNQJPN_PC1"]
+PROJECT_DIR = Path(__file__).resolve().parent
 
-print("Current working directory:", os.getcwd())
 
-# === 1. Set your file paths ===
-# Use absolute paths or put the files in this folder and just use filenames.
+def load_returns(data_dir):
+    """Align the four percentage series on dates and convert to decimals."""
+    tables = []
+    for name in SERIES:
+        path = data_dir / f"{name}.xlsx"
+        if not path.is_file():
+            raise FileNotFoundError(f"Missing input: {path}. See data/README.md.")
+        table = pd.read_excel(path, engine="openpyxl")
+        required = {"observation_date", name}
+        if not required.issubset(table.columns):
+            raise ValueError(f"{path.name} needs columns {sorted(required)}")
+        table = table[["observation_date", name]].copy()
+        table["observation_date"] = pd.to_datetime(table["observation_date"], errors="raise")
+        if table["observation_date"].isna().any() or table["observation_date"].duplicated().any():
+            raise ValueError(f"{path.name} contains missing or duplicate dates")
+        table[name] = pd.to_numeric(table[name], errors="raise")
+        tables.append(table)
+    merged = tables[0]
+    for table in tables[1:]:
+        merged = merged.merge(table, on="observation_date", how="inner", validate="one_to_one")
+    returns = merged.set_index("observation_date").sort_index()[SERIES] / 100
+    if len(returns) < 2 or not np.isfinite(returns.to_numpy()).all():
+        raise ValueError("Need at least two common dates with finite values in all four series")
+    return returns
 
-files = {
-    "NASDAQCOM_PC1": r"C:\Users\santi_nuaavil\Downloads\NASDAQCOM_PC1.xlsx",
-    "NASDAQNQCAN_PC1": r"C:\Users\santi_nuaavil\Downloads\NASDAQNQCAN_PC1.xlsx",
-    "NASDAQNQGBN_PC1": r"C:\Users\santi_nuaavil\Downloads\NASDAQNQGBN_PC1.xlsx",
-    "NASDAQNQJPN_PC1": r"C:\Users\santi_nuaavil\Downloads\NASDAQNQJPN_PC1.xlsx",
-}
 
-# === 2. Load the Excel files safely ===
-data = {}
-
-for name, path in files.items():
-    print(f"\n--- Loading {name} from: {path}")
-    if not os.path.isfile(path):
-        print(f"!! ERROR: File not found: {path}")
-        raise FileNotFoundError(
-            f"File for {name} not found. Check the path or move the .xlsx into {os.getcwd()}"
-        )
-
-    try:
-        # force engine for .xlsx
-        df = pd.read_excel(path, engine="openpyxl")
-    except Exception as e:
-        print(f"!! ERROR reading {path}: {e}")
-        raise
-
-    # Expect columns ["observation_date", <name>]
-    if "observation_date" not in df.columns:
-        raise ValueError(
-            f"'observation_date' column not found in {path}. Columns: {df.columns}"
-        )
-    if name not in df.columns:
-        raise ValueError(
-            f"Expected column '{name}' not found in {path}. Columns: {df.columns}"
-        )
-
-    data[name] = df[["observation_date", name]]
-
-print("\nAll files loaded successfully.")
-
-# === 3. Merge on observation_date ===
-merged = data["NASDAQCOM_PC1"]
-for key in ["NASDAQNQCAN_PC1", "NASDAQNQGBN_PC1", "NASDAQNQJPN_PC1"]:
-    merged = merged.merge(data[key], on="observation_date")
-
-merged["observation_date"] = pd.to_datetime(merged["observation_date"])
-merged = merged.set_index("observation_date")
-
-# === 4. Treat columns as monthly return series ===
-returns = merged[["NASDAQCOM_PC1",
-                  "NASDAQNQCAN_PC1",
-                  "NASDAQNQGBN_PC1",
-                  "NASDAQNQJPN_PC1"]].copy()
-
-returns = returns / 100
-
-# === 5. Descriptive statistics ===
-mean_returns = returns.mean()
-std_returns  = returns.std(ddof=1)
-var_returns  = returns.var(ddof=1)
-cov_matrix   = returns.cov()
-
-print("\n===== PER-ASSET MEAN RETURNS (monthly) =====")
-print(mean_returns)
-
-print("\n===== PER-ASSET STANDARD DEVIATIONS (monthly) =====")
-print(std_returns)
-
-print("\n===== PER-ASSET VARIANCES (monthly) =====")
-print(var_returns)
-
-print("\n===== COVARIANCE MATRIX (monthly) =====")
-print(cov_matrix)
-
-# === 6. Max Sharpe ratio portfolio (NO SHORTING, rf = 0) ===
-
-mu    = mean_returns.values
-Sigma = cov_matrix.values
-n     = len(mu)
-
-def neg_sharpe(weights, mu, Sigma):
-    """Negative Sharpe ratio (rf = 0) for scipy minimize."""
-    port_return = np.dot(weights, mu)
-    port_var    = weights @ Sigma @ weights
-    port_std    = np.sqrt(port_var)
-    # To avoid division-by-zero issues
-    if port_std == 0:
+def negative_sharpe(weights, mean_returns, covariance):
+    """Minimizing negative return/volatility maximizes Sharpe when rf = 0."""
+    volatility = np.sqrt(weights @ covariance @ weights)
+    if volatility <= 0:
         return 1e10
-    return -port_return / port_std
+    return -(weights @ mean_returns) / volatility
 
-# Constraint: sum of weights = 1
-constraints = (
-    {'type': 'eq', 'fun': lambda w: np.sum(w) - 1},
-)
 
-# Bounds: 0 <= w_i <= 1 (no shorting)
-bounds = tuple((0.0, 1.0) for _ in range(n))
+def analyze(returns, output_dir):
+    mean_returns = returns.mean()
+    covariance = returns.cov()
+    for title, values in [
+        ("PER-SERIES MEAN", mean_returns),
+        ("PER-SERIES STANDARD DEVIATION", returns.std(ddof=1)),
+        ("PER-SERIES VARIANCE", returns.var(ddof=1)),
+        ("COVARIANCE MATRIX", covariance),
+    ]:
+        print(f"\n===== {title} (per observation) =====")
+        print(values.to_string(float_format=lambda value: f"{value:.6f}"))
 
-# Initial guess: equal weights
-initial = np.ones(n) / n
+    mean_vector = mean_returns.to_numpy()
+    covariance_matrix = covariance.to_numpy()
+    number_of_series = len(SERIES)
+    result = minimize(
+        negative_sharpe,
+        np.ones(number_of_series) / number_of_series,
+        args=(mean_vector, covariance_matrix),
+        method="SLSQP",
+        bounds=[(0.0, 1.0)] * number_of_series,
+        constraints=[{"type": "eq", "fun": lambda weights: weights.sum() - 1}],
+    )
+    if not result.success:
+        raise RuntimeError(f"Optimization did not converge: {result.message}")
+    weights = result.x
+    if not np.isclose(weights.sum(), 1, atol=1e-6) or (weights < -1e-6).any():
+        raise RuntimeError("Optimizer returned an infeasible allocation")
+    portfolio_return = float(weights @ mean_vector)
+    portfolio_variance = float(weights @ covariance_matrix @ weights)
+    portfolio_volatility = np.sqrt(portfolio_variance)
+    if portfolio_volatility <= 0:
+        raise ValueError("Portfolio volatility must be positive to calculate Sharpe")
+    print(f"\nAligned observations: {len(returns)}; {returns.index.min().date()} to {returns.index.max().date()}")
+    print("\n===== MAX SHARPE WEIGHTS (long-only, rf = 0) =====")
+    print(pd.Series(weights, index=SERIES).to_string(float_format=lambda value: f"{value:.6f}"))
+    print("\n===== PORTFOLIO STATISTICS (per observation) =====")
+    print(f"Mean return: {portfolio_return:.6f}")
+    print(f"Standard deviation: {portfolio_volatility:.6f}")
+    print(f"Variance: {portfolio_variance:.6f}")
+    print(f"Sharpe ratio: {portfolio_return / portfolio_volatility:.6f}")
+    # Preserve the original arithmetic annualization; validity depends on inputs.
+    print("\n===== CONDITIONAL ANNUALIZATION (assuming monthly returns) =====")
+    print("Only meaningful if inputs are actual monthly returns, not year-over-year changes.")
+    print(f"Annualized mean return: {portfolio_return * 12:.6f}")
+    print(f"Annualized standard deviation: {portfolio_volatility * np.sqrt(12):.6f}")
+    print(f"Annualized Sharpe ratio: {portfolio_return / portfolio_volatility * np.sqrt(12):.6f}")
 
-opt_result = minimize(
-    neg_sharpe,
-    initial,
-    args=(mu, Sigma),
-    method='SLSQP',
-    bounds=bounds,
-    constraints=constraints,
-)
+    figure, axis = plt.subplots(figsize=(8, 4.5))
+    bars = axis.bar([name.removesuffix("_PC1") for name in SERIES], weights * 100, color="#26689a")
+    axis.bar_label(bars, fmt="%.1f%%", padding=3)
+    axis.set(ylabel="Portfolio weight (%)", ylim=(0, 110), title="Maximum-Sharpe allocation | Long-only, rf = 0")
+    figure.tight_layout()
+    figure.savefig(output_dir / "portfolio_weights.png", dpi=160)
+    plt.close(figure)
 
-if not opt_result.success:
-    print("\nOptimization did NOT converge:")
-    print(opt_result.message)
-else:
-    print("\nOptimization converged successfully.")
 
-weights_ns = opt_result.x
-weights_ns_series = pd.Series(weights_ns, index=returns.columns, name="Weight (No Shorting)")
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--data-dir", type=Path, default=PROJECT_DIR / "data")
+    parser.add_argument("--output-dir", type=Path, default=PROJECT_DIR / "outputs")
+    args = parser.parse_args()
+    returns = load_returns(args.data_dir)
+    args.output_dir.mkdir(parents=True, exist_ok=True)
+    report = args.output_dir / "portfolio_results.txt"
+    with report.open("w", encoding="utf-8") as stream, redirect_stdout(stream):
+        analyze(returns, args.output_dir)
+    print(f"Saved report: {report}")
+    print(f"Saved chart: {args.output_dir / 'portfolio_weights.png'}")
 
-# Portfolio statistics (monthly)
-port_mean_ns = float(weights_ns @ mu)
-port_var_ns  = float(weights_ns @ Sigma @ weights_ns)
-port_std_ns  = np.sqrt(port_var_ns)
-sharpe_ns    = port_mean_ns / port_std_ns
 
-print("\n===== MAX SHARPE (NO SHORTING) WEIGHTS =====")
-print(weights_ns_series)
-
-print("\n===== PORTFOLIO STATS (NO SHORTING, monthly) =====")
-print(f"Expected return: {port_mean_ns:.6f}")
-print(f"Std deviation:   {port_std_ns:.6f}")
-print(f"Variance:        {port_var_ns:.6f}")
-print(f"Sharpe ratio:    {sharpe_ns:.6f}")
-
-# === 7. Optional: Annualize assuming 12 months/year ===
-annual_mean_ns   = port_mean_ns * 12
-annual_std_ns    = port_std_ns * np.sqrt(12)
-annual_sharpe_ns = annual_mean_ns / annual_std_ns
-
-print("\n===== ANNUALIZED STATS (NO SHORTING, 12 months/year) =====")
-print(f"Annualized expected return: {annual_mean_ns:.6f}")
-print(f"Annualized std deviation:   {annual_std_ns:.6f}")
-print(f"Annualized Sharpe ratio:    {annual_sharpe_ns:.6f}")
-
-output_file.close()
+if __name__ == "__main__":
+    main()
